@@ -443,6 +443,7 @@ function ShareTab({ electionId }: { electionId: string }) {
 }
 
 function ResultsTab({ election, candidates, canManage, refresh }: { election: ElectionDoc; candidates: ElectionCandidate[]; canManage: boolean; refresh: () => void }) {
+  const { userDoc } = useAuth();
   const [result, setResult] = useState<ElectionResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
