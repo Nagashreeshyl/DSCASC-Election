@@ -1,0 +1,171 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------------------
+    // HELPERS
+    // ---------------------------------------------------------------------------
+    function isAdmin() {
+      return request.auth.token.email in [
+        'powrrskanda@gmail.com',
+        'nagashreeshyl@gmail.com'
+      ];
+    }
+    function callerRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    function isTeacher() {
+      return callerRole() == 'teacher';
+    }
+    function isCandidate() {
+      return callerRole() == 'candidate';
+    }
+    function isElectionManager(electionId) {
+      return isAdmin()
+        || get(/databases/$(database)/documents/elections/$(electionId)).data.createdBy == request.auth.uid;
+    }
+    function electionLive(electionId) {
+      let e = get(/databases/$(database)/documents/elections/$(electionId)).data;
+      return e != null && request.time >= e.startTime && request.time <= e.endTime;
+    }
+
+    // ---------------------------------------------------------------------------
+    // USERS
+    // ---------------------------------------------------------------------------
+    match /users/{uid} {
+      allow read: if request.auth != null
+        && (request.auth.uid == uid || isAdmin() || isTeacher());
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        // role can only be claimed if legitimately allowed
+        && (
+             request.resource.data.role == 'student'
+          || request.resource.data.role == 'candidate'
+          || request.resource.data.role == 'teacher'
+          || (request.resource.data.role == 'admin' && isAdmin())
+        )
+        // candidate/teacher roles require a corresponding invitation document
+        && (request.resource.data.role != 'candidate'
+            || exists(/databases/$(database)/documents/candidateEmails/(request.auth.token.email)))
+        && (request.resource.data.role != 'teacher'
+            || exists(/databases/$(database)/documents/teacherProfiles/(request.auth.token.email)));
+      // Role is immutable after creation.
+      allow update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.uid == resource.data.uid;
+      allow delete: if false;
+    }
+
+    // ---------------------------------------------------------------------------
+    // TEACHER PROFILES  (doc id = email)
+    // ---------------------------------------------------------------------------
+    match /teacherProfiles/{email} {
+      allow read: if request.auth != null
+        && (request.auth.token.email == email || isAdmin() || isTeacher());
+      allow create: if request.auth != null && isAdmin();
+      allow update: if request.auth != null
+        && (
+             (request.auth.token.email == email && request.resource.data.active == resource.data.active)
+          || isAdmin()
+        );
+      allow delete: if request.auth != null && isAdmin();
+    }
+
+    // ---------------------------------------------------------------------------
+    // CANDIDATE INVITATIONS (doc id = email)
+    // ---------------------------------------------------------------------------
+    match /candidateEmails/{email} {
+      allow read: if request.auth != null
+        && (request.auth.token.email == email || isAdmin() || isTeacher());
+      allow create: if request.auth != null && (isAdmin() || isTeacher());
+      // Candidate sets their own uid on first login; nothing else changes.
+      allow update: if request.auth != null
+        && request.auth.token.email == email
+        && request.resource.data.email == resource.data.email;
+      allow delete: if request.auth != null && (isAdmin() || isTeacher());
+    }
+
+    // ---------------------------------------------------------------------------
+    // CANDIDATE PROFILES (doc id = uid)
+    // ---------------------------------------------------------------------------
+    match /candidateProfiles/{uid} {
+      allow read: if request.auth != null
+        && (request.auth.uid == uid || isAdmin() || isTeacher());
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.email == request.auth.token.email;
+      allow update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.email == resource.data.email;
+      allow delete: if false;
+    }
+
+    // ---------------------------------------------------------------------------
+    // ELECTIONS
+    // ---------------------------------------------------------------------------
+    match /elections/{electionId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && (isTeacher() || isAdmin())
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update: if request.auth != null
+        && isElectionManager(electionId)
+        && request.resource.data.createdBy == resource.data.createdBy;
+      allow delete: if request.auth != null && isAdmin();
+
+      // Candidates enrolled in this election
+      match /candidates/{candidateUid} {
+        allow read: if request.auth != null;
+        allow create, update: if request.auth != null && isElectionManager(electionId);
+        allow delete: if request.auth != null && isElectionManager(electionId);
+      }
+
+      // Eligible students (restricted mode). Each user may read only their own row.
+      match /eligibleStudents/{email} {
+        allow read: if request.auth != null
+          && (request.auth.token.email == email || isElectionManager(electionId));
+        allow create, update, delete: if request.auth != null && isElectionManager(electionId);
+      }
+
+      // VOTES — secret & immutable. One vote per user, enforced by create-only + doc existence.
+      match /votes/{voteId} {
+        function expectedVoterKind(e) {
+          return request.auth.token.email == e.authority.hodEmail ? 'hod'
+            : request.auth.token.email == e.authority.coordinatorEmail ? 'coordinator'
+            : request.auth.token.email == e.authority.counsellorEmail ? 'counsellor'
+            : callerRole() == 'candidate' ? 'candidate'
+            : 'student';
+        }
+        allow read: if request.auth != null
+          && (request.auth.uid == resource.data.voterId || isElectionManager(electionId));
+        // Single immutable vote. No update, no delete.
+        allow create: if request.auth != null
+          && request.auth.uid == voteId
+          && request.resource.data.voterId == voteId
+          && electionLive(electionId)
+          // voterKind must reflect the voter's real role/authority (prevents weight spoofing)
+          && request.resource.data.voterKind == expectedVoterKind(get(/databases/$(database)/documents/elections/$(electionId)).data)
+          // candidate voters may only store the opposite-gender selection
+          && (
+               (callerRole() != 'candidate')
+            || (request.resource.data.maleCandidateId == null && request.resource.data.femaleCandidateId != null)
+            || (request.resource.data.femaleCandidateId == null && request.resource.data.maleCandidateId != null)
+             );
+        allow update: if false;
+        allow delete: if false;
+      }
+
+      // RESULTS — readable by all authenticated users once published; written only by managers.
+      match /result/{resultId} {
+        allow read: if request.auth != null;
+        allow create, update: if request.auth != null && isElectionManager(electionId);
+        allow delete: if false;
+      }
+    }
+  }
+}
