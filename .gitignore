@@ -7,3 +7,5 @@ out
 .DS_Store
 firebase-debug.log
 firestore-debug.log
+.vercel
+.env*.local
