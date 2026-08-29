@@ -54,6 +54,19 @@ async function newPage(browser) {
   return page;
 }
 
+async function newMobilePage(browser) {
+  const ctx = await browser.newContext({ 
+    viewport: { width: 375, height: 812 },
+    userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+  });
+  const page = await ctx.newPage();
+  page.on("pageerror", (e) => console.log("  [mobile pageerror]", e.message));
+  page.on("response", async (r) => {
+    if (r.status() === 403) console.log("  [mobile 403 body]", (await r.text()).slice(0, 200));
+  });
+  return page;
+}
+
 async function seed() {
   await fs.collection("teacherProfiles").doc("teachertest@gmail.com").set({
     active: true,
@@ -64,12 +77,6 @@ async function seed() {
   });
   await fs.collection("candidateEmails").doc("candidatetest@gmail.com").set({ email: "candidatetest@gmail.com", uid: "" });
 
-  // Pre-seed role records. The Firebase Emulator cannot resolve
-  // `request.auth.token.email` inside `exists()` document paths (only direct
-  // comparisons), so the first-login user-doc CREATE for teacher/candidate is
-  // emulator-blocked. Seeding the docs lets the E2E exercise the real app
-  // flows; the create rules themselves are validated for `admin` and are
-  // correct for production (where the token email is available in paths).
   const seedNow = Date.now();
   await fs.collection("users").doc("teachertest_gmail_com").set({
     uid: "teachertest_gmail_com", email: "teachertest@gmail.com", displayName: "teachertest",
@@ -124,6 +131,11 @@ async function seed() {
     photoUrl: "",
     enrolledAt: now
   });
+
+  const existingVotes = await fs.collection("elections").doc(eid).collection("votes").get();
+  for (const doc of existingVotes.docs) {
+    await doc.ref.delete();
+  }
   console.log("seed complete");
 }
 
@@ -251,7 +263,8 @@ async function main() {
       check("Teacher election created", created);
       // open its Manage page via the election id
       const evSnap = await fs.collection("elections").where("name", "==", "Teacher Made Election").get();
-      const electionId = evSnap.docs[0]?.id;
+      const docs = evSnap.docs.sort((a, b) => (b.data().createdAt || 0) - (a.data().createdAt || 0));
+      const electionId = docs[0]?.id;
       if (!electionId) {
         check("Candidate enrolled", false, "election id not found");
         await page.close();
@@ -259,10 +272,11 @@ async function main() {
         await page.goto(BASE + "/teacher/election/" + electionId, { waitUntil: "domcontentloaded" });
         await page.getByRole("tab", { name: "Candidates" }).waitFor({ timeout: 15000 });
         await page.getByRole("tab", { name: "Candidates" }).click();
-        await page.getByPlaceholder("A7X2K").fill(candidateCode);
-        await page.getByRole("button", { name: "Lookup" }).click();
-        await page.getByRole("button", { name: "Enroll" }).click();
-        check("Candidate enrolled", await page.getByText("Test Candidate").waitFor({ timeout: 8000 }).then(() => true).catch(() => false));
+      await page.getByPlaceholder("A7X2K").fill(candidateCode);
+      await page.getByRole("button", { name: "Lookup" }).click();
+      await page.getByRole("button", { name: "Enroll" }).waitFor({ timeout: 15000 });
+      await page.getByRole("button", { name: "Enroll" }).click();
+      check("Candidate enrolled", await page.getByText("Test Candidate").waitFor({ timeout: 15000 }).then(() => true).catch(() => false));
         await page.close();
       }
     }
@@ -310,6 +324,44 @@ async function main() {
       const resBody = await sp.textContent("body");
       check("Results revealed to student", /WINNER|Arjun Male|Meera Female/i.test(resBody || ""));
       await sp.close();
+    }
+
+    // ---- Mobile flows ----
+    {
+      const page = await newMobilePage(browser);
+      await login(page, "powrrskanda@gmail.com");
+      check("Mobile admin routed to /admin", page.url().includes("/admin"));
+      check("Mobile admin dashboard renders", await page.getByText("Admin Dashboard").waitFor({ timeout: 15000 }).then(() => true).catch(() => false));
+      const adminMenu = await page.getByRole("button", { name: "Toggle menu" }).count();
+      check("Mobile admin shows menu button", adminMenu > 0);
+      await page.close();
+    }
+    {
+      const page = await newMobilePage(browser);
+      await login(page, "teachertest@gmail.com");
+      check("Mobile teacher routed to /teacher", page.url().includes("/teacher"));
+      check("Mobile teacher dashboard renders", await page.getByText("Teacher Dashboard").waitFor({ timeout: 15000 }).then(() => true).catch(() => false));
+      const teacherMenu = await page.getByRole("button", { name: "Toggle menu" }).count();
+      check("Mobile teacher shows menu button", teacherMenu > 0);
+      await page.close();
+    }
+    {
+      const page = await newMobilePage(browser);
+      await login(page, "studenttest@gmail.com");
+      check("Mobile student routed to /student", page.url().includes("/student"));
+      check("Mobile student dashboard renders", await page.getByText("Student Dashboard").waitFor({ timeout: 15000 }).then(() => true).catch(() => false));
+      const studentMenu = await page.getByRole("button", { name: "Toggle menu" }).count();
+      check("Mobile student shows menu button", studentMenu > 0);
+      await page.close();
+    }
+    {
+      const page = await newMobilePage(browser);
+      await login(page, "candidatetest@gmail.com");
+      check("Mobile candidate routed to /candidate", page.url().includes("/candidate"));
+      check("Mobile candidate dashboard renders", await page.getByText("Candidate Dashboard").waitFor({ timeout: 15000 }).then(() => true).catch(() => false));
+      const candMenu = await page.getByRole("button", { name: "Toggle menu" }).count();
+      check("Mobile candidate shows menu button", candMenu > 0);
+      await page.close();
     }
   } catch (e) {
     console.log("FATAL:", e.message);

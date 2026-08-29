@@ -72,7 +72,7 @@ export function DashboardShell({
 
       {/* Main */}
       <div className="lg:pl-64">
-        <header className="flex h-20 items-center justify-between border-b-2 border-black bg-white px-5">
+        <header className="flex h-20 items-center justify-between border-b-2 border-black bg-white px-4">
           <button
             className="rounded-md border-2 border-black p-2 lg:hidden"
             onClick={() => setMobileOpen((o) => !o)}
@@ -80,21 +80,21 @@ export function DashboardShell({
           >
             {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex items-center gap-2 sm:gap-3">
             {fbUser?.photoURL && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={fbUser.photoURL} alt="" className="h-9 w-9 rounded-full border-2 border-black" />
+              <img src={fbUser.photoURL} alt="" className="h-8 w-8 rounded-full border-2 border-black sm:h-9 sm:w-9" />
             )}
-            <div className="text-right">
+            <div className="hidden text-right sm:block">
               <p className="text-sm font-bold leading-tight">{userDoc?.displayName}</p>
               <p className="text-xs uppercase text-muted-foreground">{role}</p>
             </div>
             <Button variant="outline" size="sm" onClick={handleSignOut}>
-              <LogOut className="h-4 w-4" /> Sign out
+              <LogOut className="h-4 w-4" /> <span className="hidden sm:inline">Sign out</span>
             </Button>
           </div>
         </header>
-        <main className="container max-w-6xl py-8">{children}</main>
+        <main className="container max-w-6xl py-6 sm:py-8">{children}</main>
       </div>
       {mobileOpen && (
         <div className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setMobileOpen(false)} />
