@@ -113,7 +113,7 @@ function CandidateInner() {
         : photoPreview && profile?.photoUrl === photoPreview
         ? { url: profile.photoUrl, publicId: profile.cloudinaryPublicId }
         : null;
-      const code = await saveCandidateProfile(userDoc.uid, data, photo);
+      const code = await saveCandidateProfile(userDoc.uid, data, photo, userDoc.email);
       setSavedCode(code);
       setMessage("Profile saved successfully!");
       const refreshed = await getCandidateProfile(userDoc.uid);

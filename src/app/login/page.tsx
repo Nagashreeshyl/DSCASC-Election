@@ -20,8 +20,28 @@ export default function LoginPage() {
     try {
       await signInWithGoogle();
       router.replace("/dashboard");
-    } catch (e) {
-      alert("Google sign-in failed. Please try again.");
+    } catch (e: any) {
+      console.error("Google sign-in error:", e);
+      const code = e?.code ?? "";
+      const messages: Record<string, string> = {
+        "auth/unauthorized-domain":
+          "This domain is not authorized in Firebase. Add it under Authentication → Settings → Authorized domains.",
+        "auth/popup-blocked":
+          "Your browser blocked the sign-in popup. Allow popups for this site and try again.",
+        "auth/popup-closed-by-user": "Sign-in popup was closed before completing.",
+        "auth/operation-not-allowed":
+          "Google sign-in is not enabled. Enable it under Authentication → Sign-in method.",
+        "auth/network-request-failed":
+          "Network error. Check your connection and try again.",
+        "auth/invalid-api-key": "Firebase API key is invalid or missing.",
+        "auth/internal-error": "Internal Firebase error. Try again shortly.",
+        "auth/account-exists-with-different-credential":
+          "An account already exists with a different sign-in method.",
+      };
+      alert(
+        messages[code] ??
+          `Google sign-in failed (${code || "unknown"}). See console for details.`
+      );
     }
   }
 

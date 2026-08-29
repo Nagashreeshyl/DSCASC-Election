@@ -21,6 +21,7 @@ export async function saveCandidateProfile(
   uid: string,
   input: CandidateProfileInput,
   photo: { url: string; publicId: string } | null,
+  email: string,
   firestore: Firestore = db
 ): Promise<string> {
   const ref = doc(firestore, "candidateProfiles", uid);
@@ -33,6 +34,8 @@ export async function saveCandidateProfile(
   }
 
   const updated: Partial<CandidateProfile> = {
+    uid,
+    email,
     name: input.name,
     gender: input.gender,
     promises: input.promises,
@@ -48,6 +51,6 @@ export async function saveCandidateProfile(
     updated.cloudinaryPublicId = existing.cloudinaryPublicId;
   }
 
-  await updateDoc(ref, updated);
+  await setDoc(ref, updated, { merge: true });
   return code;
 }

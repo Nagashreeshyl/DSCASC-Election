@@ -7,13 +7,15 @@ service cloud.firestore {
     // HELPERS
     // ---------------------------------------------------------------------------
     function isAdmin() {
-      return request.auth.token.email in [
+      let email = request.auth.token.email.toLowerCase();
+      return email in [
         'powrrskanda@gmail.com',
         'nagashreeshyl@gmail.com'
       ];
     }
     function callerRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+      let p = /databases/$(database)/documents/users/$(request.auth.uid);
+      return exists(p) ? get(p).data.role : null;
     }
     function isTeacher() {
       return callerRole() == 'teacher';
@@ -27,7 +29,8 @@ service cloud.firestore {
     }
     function electionLive(electionId) {
       let e = get(/databases/$(database)/documents/elections/$(electionId)).data;
-      return e != null && request.time >= e.startTime && request.time <= e.endTime;
+      let v = request.resource.data.votedAt;
+      return e != null && v != null && v >= e.startTime && v <= e.endTime;
     }
 
     // ---------------------------------------------------------------------------
@@ -35,7 +38,7 @@ service cloud.firestore {
     // ---------------------------------------------------------------------------
     match /users/{uid} {
       allow read: if request.auth != null
-        && (request.auth.uid == uid || isAdmin() || isTeacher());
+        && (request.auth.uid == uid || isAdmin());
       allow create: if request.auth != null
         && request.auth.uid == uid
         && request.resource.data.uid == uid
@@ -48,9 +51,9 @@ service cloud.firestore {
         )
         // candidate/teacher roles require a corresponding invitation document
         && (request.resource.data.role != 'candidate'
-            || exists(/databases/$(database)/documents/candidateEmails/(request.auth.token.email)))
+            || exists(/databases/$(database)/documents/candidateEmails/(request.auth.token.email.toLowerCase())))
         && (request.resource.data.role != 'teacher'
-            || exists(/databases/$(database)/documents/teacherProfiles/(request.auth.token.email)));
+            || exists(/databases/$(database)/documents/teacherProfiles/(request.auth.token.email.toLowerCase())));
       // Role is immutable after creation.
       allow update: if request.auth != null
         && request.auth.uid == uid
@@ -64,13 +67,10 @@ service cloud.firestore {
     // ---------------------------------------------------------------------------
     match /teacherProfiles/{email} {
       allow read: if request.auth != null
-        && (request.auth.token.email == email || isAdmin() || isTeacher());
+        && (request.auth.token.email.toLowerCase() == email || isAdmin() || isTeacher());
       allow create: if request.auth != null && isAdmin();
       allow update: if request.auth != null
-        && (
-             (request.auth.token.email == email && request.resource.data.active == resource.data.active)
-          || isAdmin()
-        );
+        && (isAdmin() || request.auth.token.email.toLowerCase() == email);
       allow delete: if request.auth != null && isAdmin();
     }
 
@@ -79,12 +79,12 @@ service cloud.firestore {
     // ---------------------------------------------------------------------------
     match /candidateEmails/{email} {
       allow read: if request.auth != null
-        && (request.auth.token.email == email || isAdmin() || isTeacher());
+        && (request.auth.token.email.toLowerCase() == email || isAdmin() || isTeacher());
       allow create: if request.auth != null && (isAdmin() || isTeacher());
       // Candidate sets their own uid on first login; nothing else changes.
       allow update: if request.auth != null
-        && request.auth.token.email == email
-        && request.resource.data.email == resource.data.email;
+        && request.auth.token.email.toLowerCase() == email
+        && resource.data.email == email;
       allow delete: if request.auth != null && (isAdmin() || isTeacher());
     }
 
@@ -92,8 +92,7 @@ service cloud.firestore {
     // CANDIDATE PROFILES (doc id = uid)
     // ---------------------------------------------------------------------------
     match /candidateProfiles/{uid} {
-      allow read: if request.auth != null
-        && (request.auth.uid == uid || isAdmin() || isTeacher());
+      allow read: if request.auth != null;
       allow create: if request.auth != null
         && request.auth.uid == uid
         && request.resource.data.uid == uid
@@ -115,7 +114,7 @@ service cloud.firestore {
         && request.resource.data.createdBy == request.auth.uid;
       allow update: if request.auth != null
         && isElectionManager(electionId)
-        && request.resource.data.createdBy == resource.data.createdBy;
+        && (!('createdBy' in request.resource.data) || request.resource.data.createdBy == resource.data.createdBy);
       allow delete: if request.auth != null && isAdmin();
 
       // Candidates enrolled in this election
@@ -128,21 +127,22 @@ service cloud.firestore {
       // Eligible students (restricted mode). Each user may read only their own row.
       match /eligibleStudents/{email} {
         allow read: if request.auth != null
-          && (request.auth.token.email == email || isElectionManager(electionId));
+          && (request.auth.token.email.toLowerCase() == email || isElectionManager(electionId));
         allow create, update, delete: if request.auth != null && isElectionManager(electionId);
       }
 
       // VOTES — secret & immutable. One vote per user, enforced by create-only + doc existence.
       match /votes/{voteId} {
         function expectedVoterKind(e) {
-          return request.auth.token.email == e.authority.hodEmail ? 'hod'
-            : request.auth.token.email == e.authority.coordinatorEmail ? 'coordinator'
-            : request.auth.token.email == e.authority.counsellorEmail ? 'counsellor'
+          let email = request.auth.token.email.toLowerCase();
+          return email == e.authority.hodEmail ? 'hod'
+            : email == e.authority.coordinatorEmail ? 'coordinator'
+            : email == e.authority.counsellorEmail ? 'counsellor'
             : callerRole() == 'candidate' ? 'candidate'
             : 'student';
         }
         allow read: if request.auth != null
-          && (request.auth.uid == resource.data.voterId || isElectionManager(electionId));
+          && (resource == null || request.auth.uid == resource.data.voterId || isElectionManager(electionId));
         // Single immutable vote. No update, no delete.
         allow create: if request.auth != null
           && request.auth.uid == voteId

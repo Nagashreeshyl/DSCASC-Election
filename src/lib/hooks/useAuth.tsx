@@ -44,7 +44,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           const doc = await ensureUserRecord(auth);
           setUserDoc(doc);
-        } catch {
+        } catch (e) {
+          console.error("ensureUserRecord failed", e);
           setUserDoc(null);
         }
       } else {
